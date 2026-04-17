@@ -1,4 +1,8 @@
 # Mini-Programm MPI-Software-Internship
+
+# ==================================================
+# IMPORTS:
+# ==================================================
 import requests
 import json
 from bs4 import BeautifulSoup # type: ignore
@@ -6,6 +10,25 @@ from bs4 import BeautifulSoup # type: ignore
 from bs4 import XMLParsedAsHTMLWarning # type: ignore
 import warnings
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+# ----- GEMINI-API-KEY: -----
+from dotenv import load_dotenv # type: ignore
+from google import genai
+import os
+load_dotenv()
+api_key = os.getenv("GEMINI_API_KEY")
+client = genai.Client(api_key=api_key)
+# print(api_key[:5])
+
+# response = client.models.generate_content(
+#     model="gemini-3-flash-preview",
+#     contents="Erwähne eine Intervention für Langlebigkeit im Menschen."
+# )
+
+# print(response.text)
+# ---------------------------
+import re
+import time
 
 # ==================================================
 # Semantic-Scholar-API (Retrieve-Paper-Functions):
@@ -79,7 +102,7 @@ def fetch_abstracts(ids: list[str]) -> str:
     response.raise_for_status() # siltent-failure vermeiden
     return response.text        # XML
 
-def parse_pubmed_xml(xml_data: str) -> list:
+def parse_pubmed_xml(xml_data: str) -> list[dict]:
     soup = BeautifulSoup(xml_data, "lxml")
     
     articles = soup.find_all("pubmedarticle")
@@ -130,6 +153,100 @@ def parse_pubmed_xml(xml_data: str) -> list:
     return papers
 
 # ==================================================
+# Paper-Handling-Functions:
+# ==================================================
+
+def validate_papers(papers: list[dict]) -> list[dict]:
+    clean = []
+    for p in papers:
+        if not p["abstract"]:
+            continue
+        if len(p["abstract"]) < 50:
+            continue
+        clean.append(p)
+    return clean
+
+def add_placeholders(papers: list[dict]) -> list[dict]:
+    for p in papers:
+        p["study_type"] = None
+        p["study_result"] = None
+        p["confidence"] = None
+    return papers
+
+def classify_paper(paper: dict) -> dict:
+    prompt = f"""
+        You are a scientific reviewer.
+
+        Task:
+        Classify the study described in the abstract.
+        
+        Return ONLY valid JSON. Do not include explanations, comments, or markdown.
+        
+        Schema:
+        {{
+            "study_type": "<one of the allowed values>",
+            "study_result": "<one of the allowed values>",
+            "confidence": <number between 0 and 1>
+        }}
+        
+        Allowed values for "study_type":
+        - 'Systematic reviews & meta-analyses'
+        - 'Randomised controlled trials (RCTs)'
+        - 'Observational / epidemiological studies'
+        - 'Animal model studies (in vivo)'
+        - 'Cell culture / in vitro studies'
+        - 'In silico / computational predictions'
+        
+        Allowed values for "study_result":
+        - 'positive'
+        - 'negative'
+        - 'neutral'
+        - 'unclear'
+        
+        Rules:
+        - Choose exactly one value per field
+        - Do not invent categories
+        - If unsure, use "unclear"
+        - Confidence must be a float betweenn 0 and 1
+        
+        Abstract:
+        '''
+        {paper["abstract"][:3000]}
+        '''
+    """
+    
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=prompt
+    )
+    
+    pmid = paper["pmid"]
+    save_text(data=response.text, path=f"data/raw/gemini/{pmid}_classification.log")
+    
+    try: 
+        result = extract_json(response.text, error_info="classify_paper() called")
+    except:
+        print("[DEBUG] classify_paper(): extract_json() failed, handling error...")
+        result = {
+            "study_type": "unknown",
+            "study_result": "unclear",
+            "confidence": 0.0
+        }
+    
+    paper.update(result)
+    return paper
+
+def classify_all(papers: list[dict]) -> list[dict]:
+    results = []
+    for p in papers:
+        time.sleep(1)
+        classified = classify_paper(p)
+        results.append(classified)
+    return results
+    
+    
+
+# ==================================================
 # Save & Load-Functions:
 # ==================================================
 
@@ -156,17 +273,23 @@ def load_text(path: str) -> str:
 def pretty(data: json) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False))
     
-def build_dataset(papers: list[dict], intervention: str):
+def build_dataset(papers: list[dict], intervention: str) -> dict:
     return {
         "intervention":intervention,
         "papers":papers
     }
+    
+def extract_json(text: str, error_info: str):
+    match = re.search(pattern=r"\{.*\}", string=text, flags=re.DOTALL)
+    if match:
+        return json.loads(match.group())
+    raise ValueError(f"No valid json found: {error_info}")
 
 # ==================================================
 # Main-Function:
 # ==================================================
 
-def data_retrieval():
+def data_retrieval() -> None:
     print("[longevity_ai] Retrieving data...")
     intervention_text = "rapamycin longevity"
     
@@ -190,14 +313,37 @@ def data_retrieval():
     
     # Schritt 5: XML in JSON parsen
     papers = parse_pubmed_xml(xml_data=xml_data)
-    dataset = build_dataset(papers=papers, intervention=intervention_text)
+    validated_papers = validate_papers(papers=papers)
+    dataset = build_dataset(papers=validated_papers, intervention=intervention_text)
     save_json(data=dataset, path="data/processed/papers.json") 
     
     print("[longevity_ai] Data saved successfully!")
 
+def classify_papers() -> None:
+    print("[longevity_ai] Classifying papers...")
+    
+    # Datensatz laden
+    dataset = load_json(path="data/processed/papers.json")
+    papers = dataset["papers"]
+    intervention_text = dataset["intervention"]
+    
+    # Klassifizieren mittels LLM
+    papers = add_placeholders(papers=papers)
+    classified_papers = classify_all(papers=papers)
+    
+    # Abspeichern
+    save_json(
+        data={"intervention": intervention_text, 
+              "papers": classified_papers},
+        path="data/processed/classified_papers.json"
+    )
+    
+    print("[longevity_ai] Papers classified successfully!")
+    
 
 def main():
     data_retrieval()
+    classify_papers()
     
 if __name__ == "__main__":
     main()
