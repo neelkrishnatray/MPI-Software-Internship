@@ -1,10 +1,12 @@
 #creating a confidence score using the json file delivered via the search
 #---------------------------------------Libraries--------------------------
 import numpy as np #using the e-function in the sigmoid activation function
-import os
+import json
 #---------------------------------------input------------------------------
+with open('data/processed/classified_papers.json','r', encoding = 'utf-8') as file: 
+    data = json.load(file)
 #---------------------------------------Sigmoid activation function--------
-def sigmoid_activ(papers,k=1.0): 
+def sigmoid_activ(data): 
     weights = {
     "Systematic review & meta-analaysis":1.0,
     "Randomised controlled trials (RCTs)":5/6,
@@ -15,11 +17,10 @@ def sigmoid_activ(papers,k=1.0):
     }
     result = {"positive":1,"negative":-1,"neutral":-0.5,"unclear":0.05}
     sum = 0
-    for paper in papers: 
+    for paper in data['papers']: 
         w = weights.get(paper['study_type'])
-        r = result.get(paper['result'])
+        r = result.get(paper['study_result'])
     sum += (w*r) 
-    score = 1/(1+np.exp(-k*sum))
+    score = 1/(1+np.exp(-1*sum))
     return score 
-
-
+print(sigmoid_activ(data))
