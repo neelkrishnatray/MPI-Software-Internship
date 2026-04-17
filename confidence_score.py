@@ -1,6 +1,8 @@
 #creating a confidence score using the json file delivered via the search
 #---------------------------------------Libraries--------------------------
 import numpy as np #using the e-function in the sigmoid activation function
+import os
+#---------------------------------------input------------------------------
 #---------------------------------------Sigmoid activation function--------
 def sigmoid_activ(papers,k=1.0): 
     weights = {
