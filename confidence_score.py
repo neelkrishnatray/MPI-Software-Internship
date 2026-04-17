@@ -22,5 +22,7 @@ def sigmoid_activ(data):
         r = result.get(paper['study_result'])
     sum += (w*r) 
     score = 1/(1+np.exp(-1*sum))
-    return score 
-print(sigmoid_activ(data))
+    data['confidence_score'] = score
+    with open('data/processed/classified_papers.json','w', encoding = 'utf-8') as file: 
+        json.dump(data,file,indent=4)
+sigmoid_activ(data)
