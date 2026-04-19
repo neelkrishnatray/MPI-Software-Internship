@@ -514,9 +514,8 @@ def extract_json(text: str, error_info: str):
 # Main-Function:
 # ==================================================
 
-def data_retrieval() -> None:
+def data_retrieval(intervention_text) -> None:
     print("[longevity_ai] Retrieving data...")
-    intervention_text = "rapamycin longevity"
     
     # Artikel suchen
     articles = search_pubmed(query=intervention_text)
@@ -606,11 +605,12 @@ def assess_qualities() -> None:
     
     print("[longevity_ai] Qualities assessed successfully!")
 
-def main():
-    # data_retrieval()
+def main(intervention):
+    data_retrieval(intervention)
     validate_data()
-    # classify_papers()
-    # assess_qualities()
+    classify_papers()
+    assess_qualities()
     
 if __name__ == "__main__":
-    main()
+    ageing_intervention = input("what ageing intervention would you like to research?: ")
+    main(ageing_intervention)

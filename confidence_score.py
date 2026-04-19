@@ -3,10 +3,12 @@
 import numpy as np #using the e-function in the sigmoid activation function
 import json
 #---------------------------------------input------------------------------
-with open('data/processed/classified_papers.json','r', encoding = 'utf-8') as file: 
-    data = json.load(file)
+
 #---------------------------------------Sigmoid activation function--------
-def sigmoid_activ(data): 
+def sigmoid_activ(): 
+    print("calculating confidence score")
+    with open('data/processed/classified_papers.json','r', encoding = 'utf-8') as file: 
+        data = json.load(file)
     weights = {
     "Systematic review & meta-analaysis":1.0,
     "Randomised controlled trials (RCTs)":5/6,
@@ -25,4 +27,4 @@ def sigmoid_activ(data):
     data['confidence_score'] = score
     with open('data/processed/classified_papers.json','w', encoding = 'utf-8') as file: 
         json.dump(data,file,indent=4)
-sigmoid_activ(data)
+    print("sucessfull")
