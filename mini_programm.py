@@ -169,19 +169,31 @@ def has_abstract(papers: list[dict]) -> list[dict]:
 def keyword_filter(paper: dict, keywords: dict) -> bool:
     text = (paper["title"] + " " + paper["abstract"]).lower()
     
-    primary = keywords["primary_terms"]
-    synonyms = keywords["synonyms"]
-    mechanisms = keywords["mechanisms"]
+    primary = [t.lower() for t in keywords["primary_terms"]]
+    synonyms = [t.lower() for t in keywords["synonyms"]]
+    mechanisms = [t.lower() for t in keywords["mechanisms"]]
+    
+    log = []
+    log.append("\n--- PAPER: ---")
+    log.append(paper["title"])
     
     # harter Filter:
-    if any(term in text for term in primary + synonyms):
-        return True
+    for term in primary + synonyms:
+        if term in text:
+            log.append(f"[MATCH primary/synonym] {term}")
+            log_debug(message="\n".join(log), path="data/raw/keyword_filter.log")
+            return True
     
     # weicher Filter:
-    if any (term in text for term in mechanisms):
-        if any(t in text for t in ["aging", "lifespan", "longevity", "healthspan"]):
-            return True
-        
+    for term in mechanisms:
+        if term in text:
+            if any(t in text for t in ["aging", "ageing", "lifespan", "longevity", "healthspan", "age-related", "senescense"]):
+                log.append(f"[MATCH mechanism] {term}")
+                log_debug(message="\n".join(log), path="data/raw/keyword_filter.log")
+                return True
+    
+    log.append("[NO MATCH]")
+    log_debug(message="\n".join(log), path="data/raw/keyword_filter.log")
     return False
 
 def add_placeholders(papers: list[dict]) -> list[dict]:
@@ -192,12 +204,15 @@ def add_placeholders(papers: list[dict]) -> list[dict]:
         p["confidence"] = None
     return papers
 
-def validate_all(papers: list[dict], keywords: dict) -> list[dict]:
+def validate_all(papers: list[dict], keywords: dict) -> tuple[list[dict], int]:
     results = []
+    filtered_out = int(0)
     for p in papers:
         if keyword_filter(paper=p, keywords=keywords):
             results.append(p)
-    return results
+        else:
+            filtered_out += 1
+    return (results, filtered_out)
         
 
 def classify_all(papers: list[dict]) -> list[dict]:
@@ -216,8 +231,16 @@ def assess_all(papers: list[dict]) -> list[dict]:
         results.append(assessed)
     return results
 
+def relation_all(papers: list[dict], intervention: str) -> list[dict]:
+    results = []
+    for p in papers:
+        time.sleep(1)
+        added = add_intervention_relation(paper=p, intervention=intervention)
+        results.append(added)
+    return results
+
 # ==================================================
-# LLM-based classify_paper()-function:
+# LLM-based generate_keywords()-function:
 # ==================================================
 
 def generate_keywords(intervention_text: str) -> dict:
@@ -472,6 +495,58 @@ def assess_quality(paper: dict) -> dict:
     return paper
 
 # ==================================================
+# LLM-based add_intervention_relation()-function:
+# ==================================================
+
+def add_intervention_relation(paper: dict, intervention: str) -> dict:
+    prompt = f"""
+    Task:
+    Determine how the following paper relates to the longevity intervention: "{intervention}"
+    
+    Return ONLY valid JSON:
+    {{
+        "intervention_relation": "<direct | indirect | mention | unrelated>",
+        "justification": "<short reason>"
+    }}
+    
+    Definitions:
+    - direct: intervention is experimentally tested or applied
+    - indirect: related biological pathway/mechanism is studied
+    - mention: intervention is only briefly mentioned, not central
+    - unrelated: no meaningful connection
+    
+    Rules: 
+    - Use abstract as primary source
+    - Be strict: most papers are NOT direct
+    - If unsure -> choose lower category ("indirect" or "mention")
+    
+    Title:
+    {paper["title"]}
+    
+    Abstract:
+    {paper["abstract"][:3000]}
+    """
+    
+    response = client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=prompt
+    )
+    
+    pmid = paper["pmid"]
+    save_text(data=response.text, path=f"data/raw/gemini/{pmid}_relation.log")
+    
+    try:
+        result = extract_json(text=response.text, error_info="add_intervention_relation() called")
+    except:
+        result = {
+            "intervention_relation": "unrelated",
+            "justification": "parsing_failed"
+        }
+        
+    paper.update(result)
+    return paper
+    
+# ==================================================
 # Save & Load-Functions:
 # ==================================================
 
@@ -510,11 +585,15 @@ def extract_json(text: str, error_info: str):
         return json.loads(match.group())
     raise ValueError(f"No valid json found: {error_info}")
 
+def log_debug(message: str, path: str) -> None:
+    with open(path, "a", encoding="utf-8") as file:
+        file.write(message + "\n")
+
 # ==================================================
 # Main-Function:
 # ==================================================
 
-def data_retrieval(intervention_text) -> None:
+def data_retrieval(intervention_text: str) -> None:
     print("[longevity_ai] Retrieving data...")
     
     # Artikel suchen
@@ -553,7 +632,10 @@ def validate_data() -> None:
     
     # Keywords generieren mittels LLM
     keywords = generate_keywords(intervention_text=intervention_text)
-    validated_papers = validate_all(papers=papers, keywords=keywords)
+    # keywords = load_json(path="data/processed/keywords/rapamycin longevity.json")
+    validated_papers, filtered_out = validate_all(papers=papers, keywords=keywords)
+    
+    print(f"[longevity_ai] {filtered_out} paper(s) filtered out.")
     
     # Abspeichern
     save_json(
@@ -568,7 +650,7 @@ def classify_papers() -> None:
     print("[longevity_ai] Classifying papers...")
     
     # Datensatz laden
-    dataset = load_json(path="data/processed/papers.json") # VALIDATED_PAPER.JSON wenn validate_data() funktioniert !!!
+    dataset = load_json(path="data/processed/validated_papers.json")
     papers = dataset["papers"]
     intervention_text = dataset["intervention"]
     
@@ -604,13 +686,34 @@ def assess_qualities() -> None:
     )
     
     print("[longevity_ai] Qualities assessed successfully!")
+    
+def add_relations() -> None:
+    print("[longevity_ai] Adding relations...")
+    
+    # Datensatz laden
+    dataset = load_json(path="data/processed/assessed_papers.json")
+    papers = dataset["papers"]
+    intervention_text = dataset["intervention"]
+    
+    # Intervention-Relation beurteilen mittels LLM
+    relation_papers = relation_all(papers=papers, intervention=intervention_text)
+    
+    # Abspeichern
+    save_json(
+        data={"intervention": intervention_text,
+              "papers": relation_papers},
+        path="data/processed/assigned_papers.json"
+    )
+    
+    print("[longevity_ai] Relations added successfully!")
 
-def main(intervention):
-    data_retrieval(intervention)
-    validate_data()
-    classify_papers()
-    assess_qualities()
+def main(intervention: str):
+    # data_retrieval(intervention)
+    # validate_data()
+    # classify_papers()
+    # assess_qualities()
+    add_relations()
     
 if __name__ == "__main__":
-    ageing_intervention = input("what ageing intervention would you like to research?: ")
+    ageing_intervention = input("What ageing intervention would you like to research?: ")
     main(ageing_intervention)
