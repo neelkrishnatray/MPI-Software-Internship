@@ -29,6 +29,7 @@ client = genai.Client(api_key=api_key)
 # ---------------------------
 import re
 import time
+import random
 
 # ==================================================
 # Semantic-Scholar-API (Retrieve-Paper-Functions):
@@ -63,7 +64,7 @@ def search_pubmed(query: str) -> json:
     params = {
         "db": "pubmed",
         "term": query,
-        "retmax": 5,
+        "retmax": 10,
         "retmode": "json"
     }
     
@@ -201,7 +202,6 @@ def add_placeholders(papers: list[dict]) -> list[dict]:
         p["study_type"] = None
         p["study_result"] = None
         p["effect_type"] = None
-        p["confidence"] = None
     return papers
 
 def validate_all(papers: list[dict], keywords: dict) -> tuple[list[dict], int]:
@@ -266,11 +266,12 @@ def generate_keywords(intervention_text: str) -> dict:
         {intervention_text}
     """
     
-    response = client.models.generate_content(
+    response = call_with_retry(
+    func=lambda: client.models.generate_content(
         model="gemini-3-flash-preview",
-        contents=prompt
-    )
-    
+        contents=prompt), 
+    max_retries=5)
+        
     save_text(data=response.text, path=f"data/processed/keywords/{intervention_text}.json")
     
     try: 
@@ -386,10 +387,11 @@ def classify_paper(paper: dict) -> dict:
         '''
     """
     
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt
-    )
+    response = call_with_retry(
+        func=lambda: client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt), 
+        max_retries=5)
     
     pmid = paper["pmid"]
     save_text(data=response.text, path=f"data/raw/gemini/{pmid}_classification.log")
@@ -470,10 +472,11 @@ def assess_quality(paper: dict) -> dict:
         '''
     """
     
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt
-    )
+    response = call_with_retry(
+        func=lambda: client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt), 
+        max_retries=5)
     
     pmid = paper["pmid"]
     save_text(data=response.text, path=f"data/raw/gemini/{pmid}_assessment.log")
@@ -527,10 +530,11 @@ def add_intervention_relation(paper: dict, intervention: str) -> dict:
     {paper["abstract"][:3000]}
     """
     
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt
-    )
+    response = call_with_retry(
+        func=lambda: client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt), 
+        max_retries=5)
     
     pmid = paper["pmid"]
     save_text(data=response.text, path=f"data/raw/gemini/{pmid}_relation.log")
@@ -545,7 +549,115 @@ def add_intervention_relation(paper: dict, intervention: str) -> dict:
         
     paper.update(result)
     return paper
+
+# ==================================================
+# Scoring-Functions:
+# ==================================================
+
+def score_paper(paper: dict) -> float:
     
+    evidence_weights = {
+        "high": 1.0,
+        "moderate": 0.7,
+        "low": 0.4,
+        "very_low": 0.1
+    }
+    
+    relation_weights = {
+        "direct": 1.0,
+        "indirect": 0.6,
+        "mention": 0.2
+    }
+    
+    effect_weights = {
+        "lifespan": 1.0,
+        "healthspan": 0.9,
+        "functional": 0.7,
+        "biomarker": 0.5,
+        "mechanistic": 0.4,
+        "unclear": 0.2
+    }
+    
+    evidence = evidence_weights.get(paper["evidence_level"], 0.1)
+    relation = relation_weights.get(paper["intervention_relation"], 0.1)
+    effect = effect_weights.get(paper["effect_type"], 0.2)
+    
+    score = (0.5 * evidence + 0.3 * relation + 0.2 * effect)
+    return round(score, 4)
+
+def rank_papers(papers: list[dict]) -> list[dict]:
+    
+    for p in papers:
+        p["relevance_score"] = score_paper(p)
+    
+    papers = sorted(papers, key=lambda x: x["relevance_score"], reverse=True)
+    return papers
+
+# ==================================================
+# LLM-based summarize_evidence()-function:
+# ==================================================
+
+def summarize_evidence(papers: list[dict], intervention: str) -> dict:
+    
+    top_papers = papers[:6]
+    context = ""
+    for p in top_papers:
+        context += f"""
+        Title: {p['title']}
+        Study type: {p['study_type']}
+        Evidence level: {p['evidence_level']}
+        Relation: {p['intervention_relation']}
+        Effect: {p['effect_type']}
+        Relevance score: {p['relevance_score']}
+        Abstract: {p['abstract'][:800]}
+        ---
+        """
+
+    prompt = f"""
+    You are a biomedical research analyst.
+
+    Task:
+    Summarize the current scientific evidence for the intervention: "{intervention}"
+
+    Use ONLY the provided papers.
+
+    Return ONLY JSON:
+    {{
+        "summary": "...",
+        "key_findings": ["..."],
+        "overall_evidence_level": "<high|moderate|low|very_low>",
+        "mechanisms": ["..."],
+        "limitations": ["..."]
+    }}
+
+    Rules:
+    - Strongly prioritize high-relevance papers (high relevance_score)
+    - Keep it concise and factual
+    - Be critical, not optimistic
+    - Do NOT overgeneralize from single studies
+    - If findings conflict, state which evidence is stronger
+    - Clearly distinguish between:
+    (1) direct intervention studies (e.g. rapamycin treatment)
+    (2) indirect or mechanistic studies (e.g., genetic mTOR manipulation)
+    - Do not use indirect evidence to contradict direct intervention results
+    
+    Papers:
+    {context}   
+    """
+    
+    response = call_with_retry(
+        func=lambda: client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=prompt), 
+        max_retries=5)
+    
+    try:
+        result = extract_json(text=response.text, error_info="summarize_evidence() called")
+    except:
+        result = {}
+        
+    return result
+
 # ==================================================
 # Save & Load-Functions:
 # ==================================================
@@ -588,6 +700,16 @@ def extract_json(text: str, error_info: str):
 def log_debug(message: str, path: str) -> None:
     with open(path, "a", encoding="utf-8") as file:
         file.write(message + "\n")
+        
+def call_with_retry(func, max_retries = 5):
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            wait = (2 ** attempt) + random.uniform(0, 1)
+            print(f"[Gemini API] Retrying API Call {attempt+1}, waiting {wait:.2f}s (catched {type(e).__name__})...")
+            time.sleep(wait)
+    raise Exception("Maximum retries exceeded.")
 
 # ==================================================
 # Main-Function:
@@ -706,14 +828,57 @@ def add_relations() -> None:
     )
     
     print("[longevity_ai] Relations added successfully!")
+    
+def score_papers() -> None:
+    print("[longevity_ai] Scoring papers...")
+    
+    # Datensatz laden
+    dataset = load_json(path="data/processed/assigned_papers.json")
+    papers = dataset["papers"]
+    intervention_text = dataset["intervention"]
+    
+    # Papers einzeln Scoren und Sortieren
+    ranked_papers = rank_papers(papers=papers)
+    
+    # Abspeichern
+    save_json(
+        data={"intervention": intervention_text,
+              "papers": ranked_papers},
+        path="data/processed/ranked_papers.json"
+    )
+    
+    print("[longevity_ai] Papers scored and sorted successfully!")
+    
+def summarize_intervention_evidence() -> None:
+    print("[longevity_ai] Summarizing top-papers...")
+    
+    # Datensatz laden
+    dataset = load_json(path="data/processed/ranked_papers.json")
+    papers = dataset["papers"]
+    intervention_text = dataset["intervention"]
+    
+    # Zusammenfassung erstellen mittels LLM 
+    summary = summarize_evidence(papers=papers, intervention=intervention_text)
+    
+    # Abspeichern
+    save_json(
+        data={"intervention": intervention_text,
+              "summary": summary},
+        path="data/processed/summary.json"
+    )
+    
+    print("[longevity_ai] Summary created successfully!")
 
 def main(intervention: str):
-    # data_retrieval(intervention)
-    # validate_data()
-    # classify_papers()
-    # assess_qualities()
-    add_relations()
+    # data_retrieval(intervention)      # hard-coded
+    # validate_data()                   # llm-based
+    # classify_papers()                 # llm-based
+    # assess_qualities()                # llm-based
+    # add_relations()                   # llm-based
+    # score_papers()                    # hard-coded
+    summarize_intervention_evidence() # llm-based
+    
     
 if __name__ == "__main__":
-    ageing_intervention = input("What ageing intervention would you like to research?: ")
+    ageing_intervention = input("[longevity_ai] What ageing intervention would you like to research: ")
     main(ageing_intervention)
