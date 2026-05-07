@@ -59,7 +59,7 @@ def generate_report(data):
     Interpretation der Ergebnisse sowie Darstellung von Grenzen der Aussagekraft.
 
     ## Confidence Score Bewertung
-    Einordnung und Interpretation des Scores und Aussage über Verlässlichkeit.
+    Einordnung und Interpretation des Scores und Aussage über Verlässlichkeit des Scores.
 
     ## Fazit
     Beantwortung der Fragestellung in komprimierter Form.
