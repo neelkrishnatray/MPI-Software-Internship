@@ -845,11 +845,11 @@ def summarize_intervention_evidence() -> None:
 def main(intervention: str):
     make_dir_structure()
     data_retrieval(intervention)      # hard-coded
-    validate_data()                   # llm-based
-    classify_papers()                 # llm-based
-    assess_qualities()                # llm-based
+    validate_data()                   # llm-based, 1 call per run
+    classify_papers()                 # llm-based, 1 call per paper
+    assess_qualities()                # llm-based, 1 call per paper
     score_papers()                    # hard-coded
-    summarize_intervention_evidence() # llm-based
+    summarize_intervention_evidence() # llm-based, 1 call per run
     
     
     

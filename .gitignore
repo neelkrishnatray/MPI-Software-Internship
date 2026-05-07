@@ -1,5 +1,8 @@
-# Ignore '.env'-File (contains 'GEMINI_API_KEY')
+# Ignore '.env'-File (contains API-KEY'S)
 .env
 
 # Ignore 'data/'-Directory
 data/
+
+# Ignore 'venv/'-Directory
+venv/
