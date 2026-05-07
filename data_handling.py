@@ -3,33 +3,29 @@
 # ==================================================
 # IMPORTS:
 # ==================================================
+
 import requests
 import json
-from bs4 import BeautifulSoup # type: ignore
-
-from bs4 import XMLParsedAsHTMLWarning # type: ignore
-import warnings
-warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
-
-# ----- GEMINI-API-KEY: -----
-from dotenv import load_dotenv # type: ignore
-from google import genai
-import os
-load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=api_key)
-# print(api_key[:5])
-
-# response = client.models.generate_content(
-#     model="gemini-3-flash-preview",
-#     contents="Erwähne eine Intervention für Langlebigkeit im Menschen."
-# )
-
-# print(response.text)
-# ---------------------------
 import re
 import time
 import random
+import os
+import warnings
+
+from dotenv import load_dotenv
+from google import genai
+import groq                             # type: ignore
+
+from bs4 import BeautifulSoup           # type: ignore
+from bs4 import XMLParsedAsHTMLWarning  # type: ignore
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+load_dotenv()
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=gemini_api_key)
+
+groq_api_key = os.getenv("GROQ_API_KEY")
+groq_client = groq.Groq(api_key=groq_api_key)
 
 # ==================================================
 # Semantic-Scholar-API (Retrieve-Paper-Functions):
@@ -64,7 +60,7 @@ def search_pubmed(query: str) -> json:
     params = {
         "db": "pubmed",
         "term": query,
-        "retmax": 10,
+        "retmax": 5,
         "retmode": "json"
     }
     
@@ -197,13 +193,6 @@ def keyword_filter(paper: dict, keywords: dict) -> bool:
     log_debug(message="\n".join(log), path="data/raw/keyword_filter.log")
     return False
 
-def add_placeholders(papers: list[dict]) -> list[dict]:
-    for p in papers:
-        p["study_type"] = None
-        p["study_result"] = None
-        p["effect_type"] = None
-    return papers
-
 def validate_all(papers: list[dict], keywords: dict) -> tuple[list[dict], int]:
     results = []
     filtered_out = int(0)
@@ -214,7 +203,6 @@ def validate_all(papers: list[dict], keywords: dict) -> tuple[list[dict], int]:
             filtered_out += 1
     return (results, filtered_out)
         
-
 def classify_all(papers: list[dict]) -> list[dict]:
     results = []
     for p in papers:
@@ -223,20 +211,12 @@ def classify_all(papers: list[dict]) -> list[dict]:
         results.append(classified)
     return results
 
-def assess_all(papers: list[dict]) -> list[dict]:
+def assess_and_relate_all(papers: list[dict], intervention: str) -> list[dict]:
     results = []
     for p in papers:
         time.sleep(1)
-        assessed = assess_quality(paper=p)
-        results.append(assessed)
-    return results
-
-def relation_all(papers: list[dict], intervention: str) -> list[dict]:
-    results = []
-    for p in papers:
-        time.sleep(1)
-        added = add_intervention_relation(paper=p, intervention=intervention)
-        results.append(added)
+        processed  = assess_and_relate(paper=p, intervention=intervention)
+        results.append(processed)
     return results
 
 # ==================================================
@@ -266,16 +246,12 @@ def generate_keywords(intervention_text: str) -> dict:
         {intervention_text}
     """
     
-    response = call_with_retry(
-    func=lambda: client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt), 
-    max_retries=5)
+    response_text = call_with_fallback(prompt=prompt)
         
-    save_text(data=response.text, path=f"data/processed/keywords/{intervention_text}.json")
+    save_text(data=response_text, path=f"data/processed/keywords/{intervention_text}.json")
     
     try: 
-        result = extract_json(text=response.text, error_info="generate_keywords() called")
+        result = extract_json(text=response_text, error_info="generate_keywords() called")
     except:
         print("[DEBUG] generate_keywords(): extract_json() failed, handling error...")
         result = {
@@ -387,17 +363,13 @@ def classify_paper(paper: dict) -> dict:
         '''
     """
     
-    response = call_with_retry(
-        func=lambda: client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt), 
-        max_retries=5)
+    response_text = call_with_fallback(prompt=prompt)
     
     pmid = paper["pmid"]
-    save_text(data=response.text, path=f"data/raw/gemini/{pmid}_classification.log")
+    save_text(data=response_text, path=f"data/raw/gemini/{pmid}_classification.log")
     
     try: 
-        result = extract_json(text=response.text, error_info="classify_paper() called")
+        result = extract_json(text=response_text, error_info="classify_paper() called")
     except:
         print("[DEBUG] classify_paper(): extract_json() failed, handling error...")
         result = {
@@ -410,55 +382,56 @@ def classify_paper(paper: dict) -> dict:
     return paper
 
 # ==================================================
-# LLM-based assess_quality()-function:
+# LLM-based assess_and_relate()-function:
 # ==================================================
 
-def assess_quality(paper: dict) -> dict:
+def assess_and_relate(paper: dict, intervention: str) -> dict:
     prompt = f"""
-        You are a biomedical research evaluator.
-        
-        Task:
-        Assess the methodological quality of the following study.
-        
-        Return ONLY valid JSON. Do not include explanations, comments, or markdown.
-        
-        Schema:
-        {{
-            "evidence_level": "<high | moderate | low | very_low>",
-            "evidence_rank": <int 1-6>,
-            "study_design": "<short description>",
-            "sample_size_estimate": "<small | medium | large | unknown>",
-            "key_limitations": ["..."],
-            "strengths": ["..."],
-        }}
-        
-        Evidence hierarchy (STRICT):
-        1 = Systematic reviews & meta-analyses (highest)
-        2 = Randomised controlled trials (RCTs)
-        3 = Observational / epidemiological studies
-        4 = Animal model studies (in vivo)
-        5 = Cell culture / in vitro studies
-        6 = In silico / computational predictions (lowest)
-        
-        Mapping rules:
-        - Rank 1-2 → evidence_level = "high"
-        - Rank 3 → "moderate"
-        - Rank 4 → "low"
-        - Rank 5-6 → "very_low"
-        
-        Constraints:
+    You are a biomedical research evaluator.
+    
+    Task:
+    Complete TWO independent tasks about the following paper.
+    
+    Return ONLY valid JSON. Do not include explanations, comments, or markdown.
+    
+    Schema:
+    {{
+        "evidence_level": "<high | moderate | low | very_low>",
+        "evidence_rank": <int 1-6>,
+        "study_design": "<short description>",
+        "sample_size_estimate": "<small | medium | large | unknown>",
+        "key_limitations": ["..."],
+        "strengths": ["..."],
+        "intervention_relation": "<direct | indirect | mention | unrelated>",
+        "justification": "<short reason>"
+    }}
+    
+    --- TASK 1: Methodological Quality ---
+    
+    Assess the methodological quality of the following study.
+    
+    Evidence hierarchy (STRICT):
+    1 = Systematic reviews & meta-analyses (highest)
+    2 = Randomised controlled trials (RCTs)
+    3 = Observational / epidemiological studies
+    4 = Animal model studies (in vivo)
+    5 = Cell culture / in vitro studies
+    6 = In silico / computational predictions (lowest)
+    
+    Mapping rules:
+    - Rank 1-2 → evidence_level = "high"
+    - Rank 3 → "moderate"
+    - Rank 4 → "low"
+    - Rank 5-6 → "very_low"
+    
+    Constraints:
         - evidence_rank MUST be consistent with the abstract
         - evidence_level MUST match the rank
         - If unclear → use rank = 6 and evidence_level = "very_low"
-        - Animal or in vitro studies CANNOT be "high"
+        - Animal model studies or in vitro studies CANNOT be "high"
         - Prefer conservative estimates
         
-        Context (may be imperfect, verify against abstract):
-        - Study type: {paper.get("study_type")}
-        - Study result: {paper.get("study_result")}
-        - Title: {paper.get("title")}
-        
-        Guidelines:
+    Guidelines:
         - Use abstract as primary source
         - Use context as support
         - Do not assume information not present
@@ -466,51 +439,9 @@ def assess_quality(paper: dict) -> dict:
         - Keep outputs short and structured
         - Focus on methodology, not biological results
         
-        Abstract:
-        '''
-        {paper["abstract"][:3000]}
-        '''
-    """
+    --- TASK 2: Intervention Relation ---
     
-    response = call_with_retry(
-        func=lambda: client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt), 
-        max_retries=5)
-    
-    pmid = paper["pmid"]
-    save_text(data=response.text, path=f"data/raw/gemini/{pmid}_assessment.log")
-
-    try:
-        result = extract_json(text=response.text, error_info="assess_quality() called")
-    except:
-        result = {
-            "quality_score": 0.0,
-            "evidence_level": "very_low",
-            "study_design": "unknown",
-            "sample_size_estimate": "unknown",
-            "key_limitations": [],
-            "strengths": [],
-            "confidence": 0.0
-        }
-        
-    paper.update(result)
-    return paper
-
-# ==================================================
-# LLM-based add_intervention_relation()-function:
-# ==================================================
-
-def add_intervention_relation(paper: dict, intervention: str) -> dict:
-    prompt = f"""
-    Task:
-    Determine how the following paper relates to the longevity intervention: "{intervention}"
-    
-    Return ONLY valid JSON:
-    {{
-        "intervention_relation": "<direct | indirect | mention | unrelated>",
-        "justification": "<short reason>"
-    }}
+    Determine how the paper relates to the longevity intervention: "{intervention}"
     
     Definitions:
     - direct: intervention is experimentally tested or applied
@@ -523,30 +454,35 @@ def add_intervention_relation(paper: dict, intervention: str) -> dict:
     - Be strict: most papers are NOT direct
     - If unsure -> choose lower category ("indirect" or "mention")
     
-    Title:
-    {paper["title"]}
-    
-    Abstract:
+    --- Context (used for both questions) ---
+    - Study type: {paper.get("study_type")}
+    - Study result: {paper.get("study_result")}
+    - Title: {paper.get("title")}
+    - Abstract: 
+    '''
     {paper["abstract"][:3000]}
+    '''
     """
     
-    response = call_with_retry(
-        func=lambda: client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt), 
-        max_retries=5)
+    response_text = call_with_fallback(prompt=prompt)
     
     pmid = paper["pmid"]
-    save_text(data=response.text, path=f"data/raw/gemini/{pmid}_relation.log")
+    save_text(data=response_text, path=f"data/raw/gemini/{pmid}_assess_relate.log")
     
     try:
-        result = extract_json(text=response.text, error_info="add_intervention_relation() called")
+        result = extract_json(text=response_text, error_info="assess_and_relate() called")
     except:
         result = {
+            "evidence_level": "very_low",
+            "evidence_rank": 6,
+            "study_design": "unknown",
+            "sample_size_estimate": "unknown",
+            "key_limitations": [],
+            "strengths": [],
             "intervention_relation": "unrelated",
             "justification": "parsing_failed"
         }
-        
+
     paper.update(result)
     return paper
 
@@ -599,7 +535,7 @@ def rank_papers(papers: list[dict]) -> list[dict]:
 
 def summarize_evidence(papers: list[dict], intervention: str) -> dict:
     
-    top_papers = papers[:6]
+    top_papers = papers[:7]
     context = ""
     for p in top_papers:
         context += f"""
@@ -645,14 +581,10 @@ def summarize_evidence(papers: list[dict], intervention: str) -> dict:
     {context}   
     """
     
-    response = call_with_retry(
-        func=lambda: client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=prompt), 
-        max_retries=5)
+    response_text = call_with_fallback(prompt=prompt)
     
     try:
-        result = extract_json(text=response.text, error_info="summarize_evidence() called")
+        result = extract_json(text=response_text, error_info="summarize_evidence() called")
     except:
         result = {}
         
@@ -679,6 +611,68 @@ def load_text(path: str) -> str:
         return file.read()
     
 # ==================================================
+# API-Calling-Error-Handling-Functions:
+# ==================================================    
+
+def call_gemini(prompt: str) -> str:
+    response = gemini_client.models.generate_content(
+        model="gemini-3-flash-preview",
+        contents=prompt
+    )
+    return response.text
+
+def call_groq(prompt: str) -> str:
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+QUOTA_PHRASES = ["quota", "daily limit", "ratequotalimitreached"]
+
+def is_quata_error(e: Exception) -> bool:
+    return any(phrase in str(e).lower() for phrase in QUOTA_PHRASES)
+
+def call_with_retry(func, max_retries=5) -> str:
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            if is_quata_error(e):
+                raise
+            
+            wait = (2 ** attempt) + random.uniform(0, 1)
+            print(f"[Retry {attempt+1}] {type(e).__name__}, waiting {wait:.2f}s...")
+            time.sleep(wait)
+    
+    raise Exception("Max retries exceeded.")
+
+PROVIDERS = [
+    ("Gemini", call_gemini),
+    ("Groq",   call_groq)
+]
+
+EXHAUSTED_PROVIDERS = set()
+
+def call_with_fallback(prompt: str) -> str:
+    for name, provider_func in PROVIDERS:
+        if name in EXHAUSTED_PROVIDERS:
+            print(f"[Provider] Skipping {name} (known exhausted)...")
+            continue
+        try:
+            print(f"[Provider] Trying {name}...")
+            return call_with_retry(func=lambda p=provider_func: p(prompt))
+        except Exception as e:
+            if is_quata_error(e):
+                print(f"[Provider] {name} quata reched, blacklisting...")
+                EXHAUSTED_PROVIDERS.add(name)
+            else:
+                print(f"[Provider] {name} exhausted ({type(e).__name__}), switching...")
+            continue
+    
+    raise Exception("All providers exhausted.")
+    
+# ==================================================
 # Helper-Functions:
 # ==================================================
 
@@ -692,28 +686,28 @@ def build_dataset(papers: list[dict], intervention: str) -> dict:
     }
     
 def extract_json(text: str, error_info: str):
-    match = re.search(pattern=r"\{.*\}", string=text, flags=re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    raise ValueError(f"No valid json found: {error_info}")
+    matches = re.findall(pattern=r"\{.*?\}", string=text, flags=re.DOTALL)
+    matches_sorted = sorted(matches, key=len, reverse=True)
+    
+    for match in matches_sorted:
+        try:
+            return json.loads(match)
+        except json.JSONDecodeError:
+            continue
+        
+    raise ValueError(f"No valid JSON found: {error_info}")
 
 def log_debug(message: str, path: str) -> None:
     with open(path, "a", encoding="utf-8") as file:
         file.write(message + "\n")
-        
-def call_with_retry(func, max_retries = 5):
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except Exception as e:
-            wait = (2 ** attempt) + random.uniform(0, 1)
-            print(f"[Gemini API] Retrying API Call {attempt+1}, waiting {wait:.2f}s (catched {type(e).__name__})...")
-            time.sleep(wait)
-    raise Exception("Maximum retries exceeded.")
 
 # ==================================================
 # Main-Function:
 # ==================================================
+
+def make_dir_structure() -> None:
+    os.makedirs(name="data/processed/keywords", exist_ok=True)
+    os.makedirs(name="data/raw/gemini", exist_ok=True)
 
 def data_retrieval(intervention_text: str) -> None:
     print("[longevity_ai] Retrieving data...")
@@ -777,7 +771,6 @@ def classify_papers() -> None:
     intervention_text = dataset["intervention"]
     
     # Klassifizieren mittels LLM
-    papers = add_placeholders(papers=papers)
     classified_papers = classify_all(papers=papers)
     
     # Abspeichern
@@ -790,7 +783,7 @@ def classify_papers() -> None:
     print("[longevity_ai] Papers classified successfully!")
 
 def assess_qualities() -> None:
-    print("[longevity_ai] Assessing qualities...")
+    print("[longevity_ai] Assessing qualities and adding relations...")
     
     # Datensatz laden
     dataset = load_json(path="data/processed/classified_papers.json")
@@ -798,7 +791,7 @@ def assess_qualities() -> None:
     intervention_text = dataset["intervention"]
     
     # Qualität beurteilen mittels LLM
-    assessed_papers = assess_all(papers=papers)
+    assessed_papers = assess_and_relate_all(papers=papers, intervention=intervention_text)
     
     # Abspeichern
     save_json(
@@ -807,33 +800,13 @@ def assess_qualities() -> None:
         path="data/processed/assessed_papers.json"
     )
     
-    print("[longevity_ai] Qualities assessed successfully!")
-    
-def add_relations() -> None:
-    print("[longevity_ai] Adding relations...")
-    
-    # Datensatz laden
-    dataset = load_json(path="data/processed/assessed_papers.json")
-    papers = dataset["papers"]
-    intervention_text = dataset["intervention"]
-    
-    # Intervention-Relation beurteilen mittels LLM
-    relation_papers = relation_all(papers=papers, intervention=intervention_text)
-    
-    # Abspeichern
-    save_json(
-        data={"intervention": intervention_text,
-              "papers": relation_papers},
-        path="data/processed/assigned_papers.json"
-    )
-    
-    print("[longevity_ai] Relations added successfully!")
+    print("[longevity_ai] Qualities assessed and realtions added successfully!")
     
 def score_papers() -> None:
     print("[longevity_ai] Scoring papers...")
     
     # Datensatz laden
-    dataset = load_json(path="data/processed/assigned_papers.json")
+    dataset = load_json(path="data/processed/assessed_papers.json")
     papers = dataset["papers"]
     intervention_text = dataset["intervention"]
     
@@ -870,13 +843,14 @@ def summarize_intervention_evidence() -> None:
     print("[longevity_ai] Summary created successfully!")
 
 def main(intervention: str):
-    # data_retrieval(intervention)      # hard-coded
-    # validate_data()                   # llm-based
-    # classify_papers()                 # llm-based
-    # assess_qualities()                # llm-based
-    # add_relations()                   # llm-based
-    # score_papers()                    # hard-coded
+    make_dir_structure()
+    data_retrieval(intervention)      # hard-coded
+    validate_data()                   # llm-based
+    classify_papers()                 # llm-based
+    assess_qualities()                # llm-based
+    score_papers()                    # hard-coded
     summarize_intervention_evidence() # llm-based
+    
     
     
 if __name__ == "__main__":
