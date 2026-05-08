@@ -17,6 +17,8 @@
 import data_handling    as pipeline
 import confidence_score as scoring
 import report_agent     as reporter
+import gap_analysis     as analysis
+import trend            as trend_search
 
 # ==================================================
 # Pipeline
@@ -49,8 +51,10 @@ def run(intervention: str, save_pdf: bool = False) -> None:
     # --- Schritt 7: Confidence Score ---
     scoring.calculate_confidence_score()
 
+    # --- Schritt 8: Clinical Gap Analysis --
+    analysis.main()
     # # --- TRENDS EINBAUEN ---
-
+    trend_search.main()
     # --- Schritt 8: Report ---
     reporter.create_report(save_pdf_output=save_pdf)
 

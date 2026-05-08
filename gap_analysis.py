@@ -1,116 +1,166 @@
-#libraries
-import ollama
+#IMPORTS:
+#--------------------------------------------------------
+import groq
+import os
+import random
+from google import genai
+from dotenv import load_dotenv
+from cerebras.cloud.sdk import Cerebras
 import json
-#first draft code: 
+import time
+#--------------------------------------------------------
+#Client-Initialisierung:
+#--------------------------------------------------------
+load_dotenv()
+gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=gemini_api_key)
+GEMINI_MODEL = "gemini-3-flash-preview"
+
+groq_api_key = os.getenv("GROQ_API_KEY")
+groq_client = groq.Groq(api_key=groq_api_key)
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
+cerebras_client = Cerebras(api_key=cerebras_api_key)
+CEREBRAS_MODEL = "gpt-oss-120b"
+#-------------------------------------------------------
+# API-Calling-Error-Handling-Functions: 
+#-------------------------------------------------------
+def call_gemini(prompt:str) -> str: 
+    response = gemini_client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents = prompt
+    )
+    return response.text
+
+def call_groq(prompt:str) -> str: 
+    response = groq_client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages = [{"role":"user","content":prompt}]
+    )
+    return response.choices[0].message.content
+
+def call_cerebras(prompt:str)->str: 
+    response = cerebras_client.chat.completions.create(
+        model = CEREBRAS_MODEL,
+        messages = [{"role":"user","content":prompt}]
+    )
+    return response.choices[0].message.content
+QUOTA_PHRASES = ["daily limit","ratequotalimitreached"]
+
+def is_quota_error(e:Exception)->bool:
+    return any(phrase in str(e).lower() for phrase in QUOTA_PHRASES)
+
+def call_with_retry(func,max_retries=5) -> str: 
+    for attempt in range(max_retries): 
+        try: 
+            return func() 
+        except Exception as e: 
+            if is_quota_error(e): 
+                raise
+            wait = (2**attempt)+random.uniform(0,1)
+            print(f"[Retry {attempt+1}]{type(e).__name__},waiting {wait:.2f}s...")
+            time.sleep(wait)
+    raise Exception("Max retries exceeded.")
+PROVIDERS = [
+    ("Gemini",call_gemini),
+    ("Groq",call_groq),
+    ("Cerebras",call_cerebras)
+]
+EXHAUSTED_PROVIDERS = set() 
+
+def call_with_fallback(prompt: str) -> str:
+    for name, provider_func in PROVIDERS:
+        if name in EXHAUSTED_PROVIDERS:
+            print(f"[Provider] Skipping {name} (known exhausted)...")
+            continue
+        try:
+            print(f"[Provider] Trying {name}...")
+            return call_with_retry(func=lambda p=provider_func: p(prompt))
+        except Exception as e:
+            if is_quota_error(e):
+                print(f"[Provider] {name} quata reched, blacklisting...")
+                EXHAUSTED_PROVIDERS.add(name)
+            else:
+                print(f"[Provider] {name} exhausted ({type(e).__name__}), switching...")
+            continue
+    
+    raise Exception("All providers exhausted.")
+
+# #first draft code: 
 def first_draft(data):
     formatted_data = json.dumps(data, indent=2) 
-    first_draft_prompt = """
-You are a Senior Biogerontologist. 
-Your task is to write a CLINICAL GAP ANALYSIS based EXCLUSIVELY on the provided JSON data. 
+    prompt = f"""You are a Senior Biogerontologist. Your Task is to write a clinical gap analysis based exclusively on the data provided. 
 
-MUST USED DATA FIELDS IN THE JSON DATA FOR REASONING:
-1. pmid,title,journal,pubdate,authors: Use {"title":"...","pmid":"..."} for every citation
-2.study_type/study_design: Classify what kind of evidence exits (RCT,animal,in-vitro,...)
-3.effect_type ["lifespan"|"healthspan"|"functional"|"biomarker"|"mechanistic"|"computational"|"unclear"]: Make clear Distinctions between the effect_types
-3. evidence_level ["low"|"very_low"|"moderate"|"high"|"high"] and evidence_rank [1-6]: Use these to determine how critical the gap_analysis should be
-4. sample_size_estimate["small"|"large"|"high"|"unknown"] : Fkag underpowered studies explicitly
-5. key_limitations (list) : PRE-DETERMINED weaknesses. Every limitation in the top-3 papers by relevance_score MUST appear as a seperate entry in clinical_gaps
-6. Strengths (list): Aknowledge genuine methodological strengths DO NOT overstate them. 
-7. Intervention_relation["direct"|"indirect"|"mention"]: 
-    - "direct" = study directly tests the ageing intervention or close derivative. 
-    - "indirect" = study tests a mechanistically related pathway (TOR,etc)
-    - "mention" = intervention appears in passing only. 
-    papers with relation = "mention" must NEVER be cited as GOOD
-8. relevance_score [0.0-1.0]: Papers with a score < 0.3 are background context ONLY, not primary sources. The top 3 Papers by relevance_score carry the MOST evidentiary weight.
-9. Justification: Use this to verify whether indirect papers are properly qualified. 
+SOURCE DATA: 
+'''
+{formatted_data}
+'''
 
-EVIDENCE FLAGS USE EXACTLY AS WRITTEN: 
+Writing rules: 
+1. Make Sure to use all data Fields mentioned inside the SOURCE DATA. 
+2. Every factual claim Must be cited with the title and pmid
+3. Papers with intervention_relation = “mention” MUST not be cited for efficacy. 
+4. If no data exists for a field write “DATA NOT FOUND”. 
+5. Assign evidence flags based on actual study_type and evidence_level NOT only study_result. 
+6. The Clinical gaps section must include one entry per distinct key_limitation found across the top 3 papers by relevance_score. 
+
+Evidence Flags use exactly as written: 
 - CRITICAL GAP: No human RCT data: animal/mechanistic evidence only. 
-- TRANSLATION GAP: Positive animal results, that are however not replicated in humans. 
-- CONFLICTING EVIDENCE: Studies reach opposite conclusions on the same endpoint. 
-- LOW EVIDENCE: Fewer than 3 peer-reviewed direct studies. 
-
-MUST FOLLOW FORMATTING RULES: 
-1. Cite EVERY factual claim with {"title":"...","pmid":"..."}.
-2. Papers with intervention_relation = "mention" must not be cited for efficacy. 
-3. If no data exists for a field, write "DATA NOT FOUND".
-4. Assign evidence flags based on actual study_type + evidence_level, NOT just study_result. 
-5. the clinical gaps section must include one entry per distinct key_limitation found across top 3 papers by relevance score.
-
+- TRANSLATION GAP: Positive animal results that are NOT mentioned to be replicated in humans.
+- CONFLICTING EVIDENCE: studies reach opposite conclusions on the same endpoint. 
+- LOW EVIDENCE: Fewer than 3 peer-reviewed studies.
 
 STRICT OUTPUT RULE: 
-Return ONLY a valid JSON object. Do not include any conversational text, markdown headers, or explanations.
+Return ONLY a valid JSON object. Do not include any conversational text or markdown headers. 
 
-JSON SCHEMA:
-{
-  "meta": {
-    "intervention": "string",
-    "report_date": "YYYY-MM-DD",
-    "total_papers_analysed": integer,
-    "direct_evidence_papers": integer,
-    "indirect_evidence_papers": integer,
-    "mention_only_papers": integer,
-    "average_relevance_score": float,
-    "evidence_cieling": "string — highest study_type present (e.g. Animal model in vivo)"
-  },
-  "summary": {
-    "overall_evidence_rank": "string",
-    "evidence_level": "string — e.g. Level 4 (animal studies only)",
-    "confidence_in_intervention": "HIGH | MODERATE | LOW | VERY LOW",
-    "human_trial_data_found": true | false,
-    "key_takeaways": ["string — max 3 items, one sentence each"]
-  },
-  "clinical_gaps": [
-    {
-      "gap_id": "CG-01",
-      "gap_type": "CRITICAL GAP | TRANSLATION GAP | CONFLICTING EVIDENCE | LOW EVIDENCE | EMERGING SIGNAL",
-      "domain": "string — e.g. Human Trial Data, Model Organism Generalisability, Safety",
-      "description": "string — precise explanation referencing the specific source limitation",
-      "source_limitation": "string — exact key_limitation text from the paper",
-      "affected_population": "string",
-      "citation": {"title": "string", "pmid": "string"},
-      "to_close_gap": "string — minimum study design required"
-    }
-  ],
-  "safety_profile": {
-    "reported_adverse_events": ["string — include PMID for each"],
-    "immunosuppression_risk": "DOCUMENTED | SUSPECTED | NOT ASSESSED",
-    "long_term_safety_data": "AVAILABLE | LIMITED | ABSENT",
-    "source_pmids": ["string"]
-  },
-  "conclusion": {
-    "readiness_for_human_trials": "READY | CONDITIONAL | NOT READY",
-    "rationale": "string — one paragraph justifying the verdict",
-    "suggested_next_steps": "string"
-  }
-}
+JSON SCHEMA: 
+
+{{
+“Metadata”:{{
+	“intervention”:”String”,
+	“total_papers_analysed”:integer,
+	“direct_evidence_papers”:integer,
+	“indirect_evidence_papers”:integer,
+	“mention_only_papers”:integer,
+	“average_relevance_score”:float
+	“main_study_type: “String-highest study_type present (e.g. Animal model in vitro) 
+}}, 
+“Summary”: {{
+“overall_evidence_rank”:”string”,
+“evidence_level”:”String - e.g. Level 4 (animal studies only)”,
+“confidence_in_intervention”: “HIGH | MODERATE | LOW | VERY LOW”,
+“human_trial_data_found”: true | false,
+“key_takeaways”: [“String - max 3 items, one sentence each”]
+}}, 
+“clinical_gaps”:[
+{{
+“gap_id”: integer,
+“gap_type”: “CRITICAL GAP | TRANSLATION GAP | CONFLICTING EVIDENCE | LOW EVIDENCE” , 
+“domain”: “string -e.g. Human Trial Data, Safety, Model Organism”.
+“description”: “string - precise explanation describing the specific source limitation”,
+“Citation”:{{“title”:”string”,”pmid”:”string”}},
+“to_close_gap”:”String- suggested minimum study design required to solve the gap”
+}}]
+}}
+
 """
-    user_prompt = f"""
-    Here are the provided ranked research papers on the intervention: "{data.get('intervention')}" 
-    RESEARCH DATA: 
-    {formatted_data}
-    FINAL INSTRUCTION: 
-    Generate the report now. REMEMBER TO INCLUDE THE DATA FIELDS AND FOLLOW THE STRICT RULES"""
-    reponse = ollama.chat(
-        model = "command-r7b",
-        format = "json",
-        messages = [
-            {"role":"system","content":first_draft_prompt},
-            {"role": "user","content":user_prompt}
-        ],
-        options={
-            "temperature": 0.2,
-            "num_ctx" : 16384
-        }
-    )
-    report = reponse["message"]["content"]
+    report = call_with_fallback(prompt=prompt)
     return report
 #auditor: 
 def auditor(draft,data): 
     formatted_data = json.dumps(data, indent=2)
-    instructions = """You are a Clinical Audit Specialist.
+    instructions = f"""You are a Clinical Audit Specialist.
     Your ONLY Job is to verfy the DRAFT against the SOURCE DATA. 
-    
+    SOURCE DATA: 
+    '''
+    {formatted_data}
+    '''
+    DRAFT REPORT TO AUDIT:
+    '''
+    {draft}
+    '''
+
     STRICT RULES: 
     1. DO NOT WRITE A NEW REPORT.
     2. DO NOT PROVIDE A SUMMARY.
@@ -124,59 +174,59 @@ def auditor(draft,data):
     - FLAG MISUSE: Wrong evidence flag was applied. 
     - SCORE INFLATION: Papers with a relevance_score under 0.3 are cited as primary evidences. 
     
+    Evidence Flags USE ONLY IF MISSED IN THE DRAFT IN missing_gaps : 
+    - CRITICAL GAP: No human RCT data: animal/mechanistic evidence only. 
+    - TRANSLATION GAP: Positive animal results that are NOT mentioned to be replicated in humans.
+    - CONFLICTING EVIDENCE: studies reach opposite conclusions on the same endpoint. 
+    - LOW EVIDENCE: Fewer than 3 peer-reviewed studies.
+
     OUTPUT JSON SCHEMA:
-    {
-    "audit_metadata":{
+    {{
+    "audit_metadata":{{
     "score":0-10,
     "status": "PASS | FAIL",
-    "errirs": integer
-    },
+    "errors": integer
+    }},
     "validated_facts:[
-    {
+    {{
     "claim":"string - correct claim from the draft",
     "pmid":"string"
-    }
+    }}
     ],
     "discrepancies:[
-    {
+    {{
     "claim": "string - exact mention claimed from the draft",
     "actual_fact": "string - correct information from the source data",
-    "source_field":"String - which JSON field was violated",
+    "source_field":"String - which JSON  data field was violated",
     "Error":"RELATION VIOLATION|HALLUCINATION|CITATION ERROR|OPTIMISM BIAS| FLAG MISUSE| SCORE INFLATION",
-    }
+    }}
     ],
     "missing_gaps": [
-    {
+    {{
     "title":"string",
     "pmid":"string",
     "missing_key_limitation"string - exact text from key_limitations field",
     "gap_type:"string"
-    }]
-    }"""
-    input = f"""
-        ORIGINAL SOURCE DATA (GROUND TRUTH): 
-        {formatted_data}
-        DRAFT REPORT TO AUDIT: 
-        {draft}
-    """
-    response = ollama.chat(
-        model = "medgemma:4b",
-        format = "json",
-        messages=[
-            {"role":"system","content":instructions},
-            {"role":"user","content":input}
-        ],
-        options = {"temperature": 0.1,"num_ctx" : 16384,"keep_alive":"3m"}
-    )
-    return response["message"]["content"]
-def merger(draft,data,audit): 
-    formatted_data = json.dumps(data, indent=2)
-    instructions = """You are a final medical Editor. Your task is to produce the definitive Clinical Gap Analysis JSON. 
-    Inputs: SOURCE DATA (Ground Truth), DRAFT REPORT (Template), AUDIT (Corrections)
+    }}]
+    }}"""
+    report = call_with_fallback(prompt=instructions)
+    return report
+
+def merger(draft,audit): 
+    instructions = f"""You are a final medical Editor. Your task is to produce the definitive Clinical Gap Analysis JSON. 
+    Inputs: 
+    DRAFT: 
+    '''
+    {draft}
+    '''
+    AUDIT DATA:
+    '''
+    {audit}
+    '''
     TRUTH HIERARCHY: 
-    1.SOURCE DATA: Ground truth, never contradicted
-    2.AUDIT DATA: Every discrepancy must be corrected. 
-    3. DRAFT REPORT: use its structure; replace flagged text with correct facts. 
+    1. AUDIT DATA: Every discrepancy must be corrected. 
+    2. DRAFT REPORT: use its structure; replace flagged text with correct facts. 
+    3. DO NOT MAKE ANY NEW FACTS USE ONLY THE PROVIDED SOURCES
 
     MERGING CRITERIA: 
     1. SCHEMA: Output must conform exactly to the Drafter's JSON schema. 
@@ -187,26 +237,20 @@ def merger(draft,data,audit):
 
     RETURN ONLY a valid JSON Object. 
 """
-    input = f"""
-            1. ORIGINAL SOURCE DATA (Ground Truth)
-            {formatted_data}
-            2. DRAFT REPORT (Template)
-            {draft}
-            3. AUDIT DATA (Improvements)
-            {audit}
-            FINAL TASK: Apply the Audit corrections to the Draft using the Source Data as the final authority. 
-            OUTPUT: finalized JSON
-    """
-    response = ollama.chat(
-        model = "medgemma:4b",
-        format = "json",
-        messages=[
-            {"role":"system","content":instructions},
-            {"role":"user","content":input}
-        ],
-        options = {"temperature": 0.1,"num_ctx" : 16384,"keep_alive":"3m"}
-    )
-    return response["message"]["content"]
+    report = call_with_fallback(prompt=instructions)
+    return report
+def extract_json(text): 
+    try: 
+        start_index = text.index("{")
+        end_index = text.rindex("}")+1
+        return text[start_index:end_index]
+    except ValueError:
+        return None
+def save_file(text): 
+    save_file = json.loads(text)
+    output_path = 'data/processed/clinical_gap_analysis.json'
+    with open(output_path,'w',encoding = 'utf-8') as f:
+        json.dump(save_file,f,indent=4,ensure_ascii=False)
 def main(): 
     print("Accessing ranked_papers.json...")
     with open('data/processed/ranked_papers.json','r',encoding='utf-8') as file:
@@ -216,30 +260,14 @@ def main():
     draft = first_draft(data)
     print("Sucess")
     print("Reviewing Draft...")
-    audit_data = {
-        "intervention":data.get("intervention"),
-        "papers":[
-            {
-                "pmid":paper.get("pmid"),
-                "title":paper.get("title"),
-                "evidence_rank":paper.get("evidence_rank"),
-                "study_type":paper.get("study_type"),
-                "key_limitations":paper.get("key_limitations"),
-                "relevance_score":paper.get("relevance_score"),
-                "intervention_relation":paper.get("intervention_relation")
-            }for paper in data.get("papers",[])
-        ]
-    }
-    audit = auditor(draft,audit_data)
+    audit = auditor(draft,data)
     print("Success\n")
     print("Creating final report...")
-    final = merger(draft,audit_data,audit)
+    final = merger(draft,audit)
     print("Success")
-    print("Saving Clinical_gap_analysis")
-    final_data = json.loads(final)
-    output_path = 'data/processed/clinical_gap_analysis.json'
-    with open(output_path,'w',encoding='utf-8') as f: 
-        json.dump(final_data,f,indent=4,ensure_ascii=False)
-    print("Successfully saved analysis under data/processed")
+    print("Saving Json file")
+    json_file = extract_json(final)
+    save_file(json_file)
+
 if __name__ == "__main__": 
     main()

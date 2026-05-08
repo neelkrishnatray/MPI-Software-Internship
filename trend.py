@@ -45,8 +45,6 @@ def main(query):
     output_path = 'data/processed/clinical_gap_analysis.json'
     with open(output_path,'w',encoding='utf-8') as f: 
         json.dump(save_file,f,indent=4,ensure_ascii=False)
-if __name__=="__main__": 
-    query = input("Ageing Intervention: ")
-    main(query)
+
     
 
