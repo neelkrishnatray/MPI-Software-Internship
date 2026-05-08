@@ -1,5 +1,6 @@
-# Mini-Programm MPI-Software-Internship
-
+# ==================================================
+# data_handling.py
+# python file for data-handling-part of the project
 # ==================================================
 # IMPORTS:
 # ==================================================
@@ -21,11 +22,14 @@ from bs4 import XMLParsedAsHTMLWarning  # type: ignore
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 load_dotenv()
+
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=gemini_api_key)
+GEMINI_MODEL = "gemini-3-flash-preview"
 
 groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = groq.Groq(api_key=groq_api_key)
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # ==================================================
 # Semantic-Scholar-API (Retrieve-Paper-Functions):
@@ -616,14 +620,14 @@ def load_text(path: str) -> str:
 
 def call_gemini(prompt: str) -> str:
     response = gemini_client.models.generate_content(
-        model="gemini-3-flash-preview",
+        model=GEMINI_MODEL,
         contents=prompt
     )
     return response.text
 
 def call_groq(prompt: str) -> str:
     response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content

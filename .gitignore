@@ -6,3 +6,10 @@ data/
 
 # Ignore 'venv/'-Directory
 venv/
+
+# Ignore '__pycache__/'-Directory
+__pycache__/
+
+# Ignore 'output/'-Directory
+outputs/
+
