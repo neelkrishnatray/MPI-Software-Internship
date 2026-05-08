@@ -1,39 +1,68 @@
 import os
+import ollama
+import json
 from ollama import Client
+from dotenv import load_dotenv
 
-# 1. Get the key from your environment
-# Note: Ensure you ran 'export OLLAMA_API_KEY=your_key_here' in this terminal session
-api_key = os.getenv("OLLAMA_API_KEY")
-
-if not api_key:
-    # Manual fallback for debugging—paste your key here if getenv fails
-    api_key = "PASTE_YOUR_KEY_HERE_IF_GETENV_IS_EMPTY"
-
-client = Client(
-    headers={'Authorization': f'Bearer {api_key}'}
-)
-
-try:
-    print("Checking internet access...")
-    search_results = client.web_search(query='Current Tech Trends in 2026')
-    
-    print("Search successful! Analyzing results with Command R...")
-    response = client.chat(
-        model='command-r7b',
-        messages=[
-            {
-                'role': 'system',
-                'content': f'You are an expert analyst. Use these search results to answer: {search_results}'
-            },
-            {
-                'role': 'user',
-                'content': 'What are the top 3 trends found in these results?'
-            }
-        ]
+#Retrieving API_KEY
+load_dotenv()
+api_key = os.getenv("OllAMA_API_KEY")
+#Accessing the websearch function from Ollama
+def websearch_results(query): 
+    client = Client(
+        headers={'Authorization': f'Bearer {api_key}'}
     )
-    
-    print("\n--- 2026 TREND REPORT ---")
-    print(response['message']['content'])
+    search_results = client.web_search(f"{query}research timeline milestones and announcement dates")
+    return search_results
+#transforming found data into a json format: 
+def get_trends(search_results): 
+    instructions = """You are a specialized Biotech Data Extractor. 
+Your ONLY job is to convert search data into a specific JSON format.
+DO NOT use your default summary format.
+DO NOT include 'text' or 'key_points' keys.
+Use ONLY the schema provided below."""
+    prompt = f"""
+    Based on these search results, extract the 5 most significant trends.
+        
+        SEARCH DATA:
+        {search_results}
 
-except Exception as e:
-    print(f"\nOops! Something went wrong: {e}")
+        OUTPUT MUST BE VALID JSON IN THIS EXACT FORMAT:
+        {{
+            "topic": "string",
+            "trends": [
+                {{
+                    "trend_name": "string",
+                    "summary": "2-sentence summary",
+                    "earliest_mention_date": "MM-YYYY",
+                    "trend_score": 1-10,
+                    "source_context": "Short abstract"
+                }}
+            ]
+        }}
+    """
+    response = ollama.chat(
+        model="command-r7b",
+        format="json",
+        messages=[
+            {"role":"system","content":instructions}, 
+            {"role":"user","content":prompt}
+        ],
+        options = {"temperature":0.1}
+    )
+    return response["message"]["content"]
+def main(query): 
+    print(f"Searching Trends for {query}")
+    search_results = websearch_results(query)
+    print("Success")
+    print("Summarzing Trends...")
+    trends = get_trends(search_results)
+    print("Success")
+    print("Saving results...")
+    trends_save = json.loads(trends)
+    output_path = 'data/processed/trends.json'
+    with open(output_path,'w',encoding='utf-8') as f: 
+        json.dump(trends_save,f,indent=4,ensure_ascii=False)
+    print("Success")
+if __name__ == "__main__": 
+    main("rapamycin_longetivity")
