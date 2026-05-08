@@ -31,6 +31,7 @@ def run(intervention: str, save_pdf: bool = False) -> None:
     print(f"{'='*55}\n")
 
     # --- Schritt 1: Daten abrufen ---
+    pipeline.make_dir_structure()
     pipeline.data_retrieval(intervention)
 
     # --- Schritt 2: Keyword-Validierung ---
