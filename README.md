@@ -11,8 +11,10 @@ The program runs through a fixed pipeline:
 3. **Classify** – assigns study type, result, and effect type to each paper
 4. **Assess** – evaluates methodological quality and relation to the intervention
 5. **Score** – ranks papers by a weighted relevance score
-6. **Summarize** – generates a structured evidence summary from the top papers
-7. [...]
+6. **Trends** - searches for the current trends of given intervention (2024-2026)
+7. **Clinical Gap Analysis** - generates a clinical gap analysis to fetched papers from PubMed
+8. **Summarize** – generates a structured evidence summary from the top papers
+9. [...]
 
 [...]
 
