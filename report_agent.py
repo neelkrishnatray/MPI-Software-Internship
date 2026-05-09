@@ -11,13 +11,14 @@
 # IMPORTS:
 # ==================================================
 
-import os
-import json
-import time
-import random
+import os                       # type: ignore
+import json                     # type: ignore
+import time                     # type: ignore
+import random                   # type: ignore
 import groq                     # type: ignore
-from google import genai
-from dotenv import load_dotenv
+from google import genai        # type: ignore
+from dotenv import load_dotenv  # type: ignore
+from cerebras.cloud.sdk import Cerebras     # type: ignore
 
 # ==================================================
 # Client-Initialisierung:
@@ -32,6 +33,10 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = groq.Groq(api_key=groq_api_key)
 GROQ_MODEL = "llama-3.3-70b-versatile"
+
+cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
+cerebras_client = Cerebras(api_key=cerebras_api_key)
+CEREBRAS_MODEL = "gpt-oss-120b"
 
 # ==================================================
 # API-Calling-Error-Handling-Functions:
@@ -48,6 +53,13 @@ def call_groq(prompt: str) -> str:
     response = groq_client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content
+
+def call_cerebras(prompt:str)->str: 
+    response = cerebras_client.chat.completions.create(
+        model = CEREBRAS_MODEL,
+        messages = [{"role":"user","content":prompt}]
     )
     return response.choices[0].message.content
 
@@ -71,8 +83,9 @@ def call_with_retry(func, max_retries=5) -> str:
     raise Exception("Max retries exceeded.")
 
 PROVIDERS = [
-    ("Gemini", call_gemini),
-    ("Groq",   call_groq)
+    ("Gemini",call_gemini),
+    ("Groq",call_groq),
+    ("Cerebras",call_cerebras)
 ]
 
 EXHAUSTED_PROVIDERS = set()
@@ -87,7 +100,7 @@ def call_with_fallback(prompt: str) -> str:
             return call_with_retry(func=lambda p=provider_func: p(prompt))
         except Exception as e:
             if is_quata_error(e):
-                print(f"[Provider] {name} quata reched, blacklisting...")
+                print(f"[Provider] {name} quota reached, blacklisting...")
                 EXHAUSTED_PROVIDERS.add(name)
             else:
                 print(f"[Provider] {name} exhausted ({type(e).__name__}), switching...")
@@ -229,7 +242,7 @@ Brief summary (3-5 sentences) of the methodology and key findings.
 Contextualisation of the topic and relevance of the research question within longevity research.
 
 ## Trends
-Create a timeline and contextualise the trends {data["trends"]} found. Make sure to name the sources as well.
+Create a timeline and contextualise the trends found. Make sure to name the sources as well.
 
 ## Methodology
 Description of the data basis (PubMed search), filtering criteria, and evaluation logic.
@@ -241,20 +254,20 @@ Presentation of the verified, substantiated findings — structured by evidence 
 Description of the identified mechanisms of action of the intervention.
 
 ## Clinical Gap Analysis
-Description of the identified clinical gaps {data["gaps"]}. Make sure to include the Citation of found gaps and the Suggestions to close the gaps
+Description of the identified clinical gaps. Make sure to include the Citation of found gaps and the Suggestions to close the gaps
 
 ## Discussion
 Interpretation of the results and critical examination of the limits of their validity.
  
 ## Confidence Score Assessment
-Contextualisation of the score ({data["confidence_score"]} — {data["confidence_label"]}):
+Contextualisation of the Confidence Score.
 Briefly explain the calculation basis and interpret the score in the context of the available evidence.
  
 ## Conclusion
 Answer to the research question in condensed form (3-5 sentences).
  
 ## References
-List of sources used — exclusively from the provided references, none fabricated.
+List of sources used - exclusively from the provided references, none fabricated.
  
 ---
  
@@ -278,28 +291,37 @@ def save_markdown(text: str, path: str) -> None:
  
  
 def save_pdf(markdown_text: str, path: str) -> None:
-    """
-    Converts Markdown to PDF via pypandoc.
-    Requires a local LaTeX installation (e.g. TeX Live).
-    Fails silently if LaTeX is not available.
+    """    
+    Converts Markdown to HTML to PDF via weasyprint.
+    Fails silently if weasyprint or markdown not installed.
     """
     try:
-        import pypandoc
+        import markdown as md       # type: ignore
+        from weasyprint import HTML # type: ignore
+        
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        pypandoc.convert_text(
-            markdown_text,
-            "pdf",
-            format="md",
-            outputfile=path,
-            extra_args=["--standalone", "--toc"]
-        )
+        
+        # Markdown -> HTML -> PDF
+        html_body = md.markdown(markdown_text, extensions=["tables", "fenced_code"])
+        html_full = f"""
+        <html><head>
+        <meta charset="utf-8">
+        <style>
+            body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; line-height: 1.6; }}
+            h1, h2, h3 {{ color: #2c3e50; }}
+            code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
+            pre {{ background: #f4f4f4; padding: 12px; border-radius: 5px; }}
+        </style>
+        </head>
+        <body>{html_body}</body>
+        </html>
+        """
+        HTML(string=html_full).write_pdf(path)
         print(f"[report_agent] PDF saved: {path}")
     except ImportError:
         print("[report_agent] pypandoc not installed — skipping PDF export.")
     except Exception as e:
         print(f"[report_agent] PDF export failed: {e}")
-        print("[report_agent] Note: PDF export requires a local LaTeX installation.")
- 
  
 # ==================================================
 # Pipeline Function (called by main.py)

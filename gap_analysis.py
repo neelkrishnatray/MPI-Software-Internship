@@ -1,15 +1,18 @@
-#IMPORTS:
+
+
 #--------------------------------------------------------
-import groq
-import os
-import random
-from google import genai
-from dotenv import load_dotenv
-from cerebras.cloud.sdk import Cerebras
-import json
-import time
+# IMPORTS:
 #--------------------------------------------------------
-#Client-Initialisierung:
+import groq                                 # type: ignore
+import os                                   # type: ignore     
+import random                               # type: ignore
+from google import genai                    # type: ignore              
+from dotenv import load_dotenv              # type: ignore
+from cerebras.cloud.sdk import Cerebras     # type: ignore
+import json                                 # type: ignore
+import time                                 # type: ignore
+#--------------------------------------------------------
+# Client-Initialisierung:
 #--------------------------------------------------------
 load_dotenv()
 gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -46,6 +49,7 @@ def call_cerebras(prompt:str)->str:
         messages = [{"role":"user","content":prompt}]
     )
     return response.choices[0].message.content
+
 QUOTA_PHRASES = ["daily limit","ratequotalimitreached"]
 
 def is_quota_error(e:Exception)->bool:
@@ -62,11 +66,13 @@ def call_with_retry(func,max_retries=5) -> str:
             print(f"[Retry {attempt+1}]{type(e).__name__},waiting {wait:.2f}s...")
             time.sleep(wait)
     raise Exception("Max retries exceeded.")
+
 PROVIDERS = [
     ("Gemini",call_gemini),
     ("Groq",call_groq),
     ("Cerebras",call_cerebras)
 ]
+
 EXHAUSTED_PROVIDERS = set() 
 
 def call_with_fallback(prompt: str) -> str:
@@ -79,7 +85,7 @@ def call_with_fallback(prompt: str) -> str:
             return call_with_retry(func=lambda p=provider_func: p(prompt))
         except Exception as e:
             if is_quota_error(e):
-                print(f"[Provider] {name} quata reched, blacklisting...")
+                print(f"[Provider] {name} quota reached, blacklisting...")
                 EXHAUSTED_PROVIDERS.add(name)
             else:
                 print(f"[Provider] {name} exhausted ({type(e).__name__}), switching...")
@@ -87,7 +93,7 @@ def call_with_fallback(prompt: str) -> str:
     
     raise Exception("All providers exhausted.")
 
-# #first draft code: 
+# first draft code: 
 def first_draft(data):
     formatted_data = json.dumps(data, indent=2) 
     prompt = f"""You are a Senior Biogerontologist. Your Task is to write a clinical gap analysis based exclusively on the data provided. 
@@ -147,6 +153,7 @@ JSON SCHEMA:
 """
     report = call_with_fallback(prompt=prompt)
     return report
+
 #auditor: 
 def auditor(draft,data): 
     formatted_data = json.dumps(data, indent=2)
@@ -239,6 +246,7 @@ def merger(draft,audit):
 """
     report = call_with_fallback(prompt=instructions)
     return report
+
 def extract_json(text): 
     try: 
         start_index = text.index("{")
@@ -246,11 +254,13 @@ def extract_json(text):
         return text[start_index:end_index]
     except ValueError:
         return None
+    
 def save_file(text): 
     save_file = json.loads(text)
     output_path = 'data/processed/clinical_gap_analysis.json'
     with open(output_path,'w',encoding = 'utf-8') as f:
         json.dump(save_file,f,indent=4,ensure_ascii=False)
+        
 def main(): 
     print("[Clinical Gap Analysis] Accessing ranked_papers.json...")
     with open('data/processed/ranked_papers.json','r',encoding='utf-8') as file:

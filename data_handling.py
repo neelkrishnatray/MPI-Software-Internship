@@ -5,21 +5,22 @@
 # IMPORTS:
 # ==================================================
 
-import requests
-import json
-import re
-import time
-import random
-import os
-import warnings
-
-from dotenv import load_dotenv
-from google import genai
-import groq                             # type: ignore
+import requests                         # type: ignore
+import json                             # type: ignore
+import re                               # type: ignore
+import time                             # type: ignore
+import random                           # type: ignore
+import os                               # type: ignore
+import warnings                         # type: ignore
 
 from bs4 import BeautifulSoup           # type: ignore
 from bs4 import XMLParsedAsHTMLWarning  # type: ignore
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+from dotenv import load_dotenv          # type: ignore
+from google import genai                # type: ignore
+import groq                             # type: ignore
+from cerebras.cloud.sdk import Cerebras # type: ignore
 
 load_dotenv()
 
@@ -30,6 +31,10 @@ GEMINI_MODEL = "gemini-3-flash-preview"
 groq_api_key = os.getenv("GROQ_API_KEY")
 groq_client = groq.Groq(api_key=groq_api_key)
 GROQ_MODEL = "llama-3.3-70b-versatile"
+
+cerebras_api_key = os.getenv("CEREBRAS_API_KEY")
+cerebras_client = Cerebras(api_key=cerebras_api_key)
+CEREBRAS_MODEL = "gpt-oss-120b"
 
 # ==================================================
 # Semantic-Scholar-API (Retrieve-Paper-Functions):
@@ -632,7 +637,14 @@ def call_groq(prompt: str) -> str:
     )
     return response.choices[0].message.content
 
-QUOTA_PHRASES = ["quota", "daily limit", "ratequotalimitreached"]
+def call_cerebras(prompt:str)->str: 
+    response = cerebras_client.chat.completions.create(
+        model = CEREBRAS_MODEL,
+        messages = [{"role":"user","content":prompt}]
+    )
+    return response.choices[0].message.content
+
+QUOTA_PHRASES = ["daily limit", "ratequotalimitreached"]
 
 def is_quata_error(e: Exception) -> bool:
     return any(phrase in str(e).lower() for phrase in QUOTA_PHRASES)
@@ -652,8 +664,9 @@ def call_with_retry(func, max_retries=5) -> str:
     raise Exception("Max retries exceeded.")
 
 PROVIDERS = [
-    ("Gemini", call_gemini),
-    ("Groq",   call_groq)
+    ("Gemini",call_gemini),
+    ("Groq",call_groq),
+    ("Cerebras",call_cerebras)
 ]
 
 EXHAUSTED_PROVIDERS = set()
@@ -668,7 +681,7 @@ def call_with_fallback(prompt: str) -> str:
             return call_with_retry(func=lambda p=provider_func: p(prompt))
         except Exception as e:
             if is_quata_error(e):
-                print(f"[Provider] {name} quata reched, blacklisting...")
+                print(f"[Provider] {name} quota reached, blacklisting...")
                 EXHAUSTED_PROVIDERS.add(name)
             else:
                 print(f"[Provider] {name} exhausted ({type(e).__name__}), switching...")

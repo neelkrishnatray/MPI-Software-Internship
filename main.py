@@ -3,15 +3,16 @@
 # Pipeline Orchestrator for longevity_ai
 #
 # Workflow:
-#   1. data_retrieval       — PubMed search + XML parsing
-#   2. validate_data        — LLM keyword filter
-#   3. classify_papers      — LLM classification per paper
-#   4. assess_qualities     — LLM quality assessment + relation
-#   5. score_papers         — Rule-based scoring + ranking
-#   6. summarize_evidence   — LLM summary of top papers
-#   7. confidence_score     — Normalized evidence score (0–1)
-#   ... TREND KOMMT DAZU
-#   8. create_report        — LLM-generated Markdown/PDF report
+#   1. data_retrieval       - PubMed search + XML parsing
+#   2. validate_data        - LLM keyword filter
+#   3. classify_papers      - LLM classification per paper
+#   4. assess_qualities     - LLM quality assessment + relation
+#   5. score_papers         - Rule-based scoring + ranking
+#   6. summarize_evidence   - LLM summary of top papers
+#   7. confidence_score     - Normalized evidence score (0-1)
+#   8. gap_analysis         - LLM analysis of clinial gaps
+#   9. trend_search         - LLM search of trends on topic
+#  10. create_report        — LLM-generated Markdown/PDF report
 # ==================================================
 
 import data_handling    as pipeline
@@ -21,7 +22,7 @@ import gap_analysis     as analysis
 import trend            as trend_search
 
 # ==================================================
-# Pipeline
+# Pipeline:
 # ==================================================
 
 def run(intervention: str, save_pdf: bool = False) -> None:
@@ -52,11 +53,13 @@ def run(intervention: str, save_pdf: bool = False) -> None:
     # --- Schritt 7: Confidence Score ---
     scoring.calculate_confidence_score()
 
-    # --- Schritt 8: Clinical Gap Analysis --
+    # --- Schritt 8: Clinical Gap Analysis ---
     analysis.main()
-    # # --- TRENDS EINBAUEN ---
+ 
+    # --- Schritt 9: Trends suchen ---
     trend_search.main(intervention)
-    # --- Schritt 8: Report ---
+    
+    # --- Schritt 10: Report ---
     reporter.create_report(save_pdf_output=save_pdf)
 
     print(f"\n{'='*55}")
@@ -76,4 +79,4 @@ if __name__ == "__main__":
     if not intervention:
         print("[ERROR] No intervention specified.")
     else:
-        run(intervention=intervention, save_pdf=False)
+        run(intervention=intervention, save_pdf=True)
