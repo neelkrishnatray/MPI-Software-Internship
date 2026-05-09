@@ -252,22 +252,18 @@ def save_file(text):
     with open(output_path,'w',encoding = 'utf-8') as f:
         json.dump(save_file,f,indent=4,ensure_ascii=False)
 def main(): 
-    print("Accessing ranked_papers.json...")
+    print("[Clinical Gap Analysis] Accessing ranked_papers.json...")
     with open('data/processed/ranked_papers.json','r',encoding='utf-8') as file:
         data = json.load(file)
-    print("Success")
-    print("Creating Draft...")
+    print("[Clinical Gap Analysis] Creating Draft...")
     draft = first_draft(data)
-    print("Sucess")
-    print("Reviewing Draft...")
+    print("[Clinical Gap Analysis] Reviewing Draft...")
     audit = auditor(draft,data)
-    print("Success\n")
-    print("Creating final report...")
+    print("[Clinical Gap Analysis] Creating final report...")
     final = merger(draft,audit)
-    print("Success")
-    print("Saving Json file")
     json_file = extract_json(final)
     save_file(json_file)
+    print("[Clinical Gap Analysis] Creating Clinical Gap Analysis and saving file sucessfull!")
 
 if __name__ == "__main__": 
     main()

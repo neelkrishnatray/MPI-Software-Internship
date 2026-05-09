@@ -7,7 +7,7 @@ from google.genai import types
 load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 def get_trends_with_search(query): 
-    prompt = f"""You are Biotech specialist. Find the most significant/research trends for {query} (2024-2026). 
+    prompt = f"""You are Biotech specialist. Find the most significant/research trends for {query} in regards to ageing longevity (2024-2026). 
     You Must extract the 'earliest_mention_date' (MM-YYYY) for each trend. 
     Return ONLY a JSON object following this SCHEMA: 
     {{
@@ -39,12 +39,11 @@ def extract_json(text):
     except ValueError: 
         return None
 def main(query): 
+    print(f"[Trend] Searching for trends: {query}" )
     text = get_trends_with_search(query)
     json_text = extract_json(text)
     save_file = json.loads(json_text)
-    output_path = 'data/processed/clinical_gap_analysis.json'
+    output_path = 'data/processed/trends.json'
     with open(output_path,'w',encoding='utf-8') as f: 
         json.dump(save_file,f,indent=4,ensure_ascii=False)
-
-    
-
+    print(f"[Trend] Finding and Saving Trends succesfull!")

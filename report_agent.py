@@ -103,19 +103,27 @@ def build_report_data() -> dict:
     """
     Reads ranked_papers.json and summary.json
     and assembles the data dict used in the report prompt.
+    Retrieve Information from trends.json and gap_analysis.json
     """
     with open("data/processed/ranked_papers.json", "r", encoding="utf-8") as f:
         ranked = json.load(f)
  
     with open("data/processed/summary.json", "r", encoding="utf-8") as f:
         summary_file = json.load(f)
+    
+    with open("data/processed/clinical_gap_analysis.json", "r", encoding="utf-8") as f: 
+        gap_analysis_file = json.load(f)
+    
+    with open("data/processed/trends.json","r",encoding="utf-8") as f: 
+        trends_file = json.load(f)
  
     intervention     = ranked["intervention"]
     papers           = ranked["papers"]
     summary          = summary_file.get("summary", {})
     confidence_score = ranked.get("confidence_score", "not calculated")
     confidence_label = ranked.get("confidence_label", "")
- 
+    gaps             = gap_analysis_file.get("clinical_gaps", [])
+    trends           = trends_file.get("trends",[])
     # Format source list for the prompt
     sources = []
     for p in papers:
@@ -139,6 +147,9 @@ def build_report_data() -> dict:
         "confidence_label": confidence_label,
         "sources":          sources,
         "paper_count":      len(papers),
+        "gaps":             gaps,
+        "trends":           trends
+
     }
  
  
@@ -195,6 +206,12 @@ Limitations of the evidence base:
  
 Confidence Score: {data["confidence_score"]} ({data["confidence_label"]})
 Number of papers evaluated: {data["paper_count"]}
+
+Clinical Gap: 
+{data["gaps"]}
+
+Current Trends results: 
+{data["trends"]}
  
 Available sources:
 {sources_str}
@@ -210,7 +227,10 @@ Brief summary (3-5 sentences) of the methodology and key findings.
  
 ## Introduction
 Contextualisation of the topic and relevance of the research question within longevity research.
- 
+
+## Trends
+Create a timeline and contextualise the trends {data["trends"]} found. Make sure to name the sources as well.
+
 ## Methodology
 Description of the data basis (PubMed search), filtering criteria, and evaluation logic.
  
@@ -219,7 +239,10 @@ Presentation of the verified, substantiated findings — structured by evidence 
  
 ## Biological Mechanisms
 Description of the identified mechanisms of action of the intervention.
- 
+
+## Clinical Gap Analysis
+Description of the identified clinical gaps {data["gaps"]}. Make sure to include the Citation of found gaps and the Suggestions to close the gaps
+
 ## Discussion
 Interpretation of the results and critical examination of the limits of their validity.
  

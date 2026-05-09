@@ -55,7 +55,7 @@ def run(intervention: str, save_pdf: bool = False) -> None:
     # --- Schritt 8: Clinical Gap Analysis --
     analysis.main()
     # # --- TRENDS EINBAUEN ---
-    trend_search.main()
+    trend_search.main(intervention)
     # --- Schritt 8: Report ---
     reporter.create_report(save_pdf_output=save_pdf)
 
