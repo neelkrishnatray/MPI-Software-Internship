@@ -59,12 +59,15 @@ Results are saved in [...]. Final summary can be found in [...].
 
 ## API Keys
 
-This project requires two API keys. After running `cp .env.example .env` , open `.env` and fill in:
+This project requires three API keys. After running `cp .env.example .env` , open `.env` and fill in:
 
 ```
+CEREBRAS_API_KEY=your_key_here
 GEMINI_API_KEY=your_key_here
 GROQ_API_KEY=your_key_here
+
 ```
 
 - **Gemini** – [aistudio.google.com](https://aistudio.google.com)
 - **Groq** – [console.groq.com](https://console.groq.com)
+- **Cerebras** - [cerebras.ai/inference](https://www.cerebras.ai/inference)
