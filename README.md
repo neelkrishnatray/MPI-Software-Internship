@@ -95,7 +95,8 @@ GROQ_API_KEY=your_key_here
 
   ---
 
-  ## Limitations
+## Limitations
+This agentic workflow has the ability to deliver an accurate scientific report of ageing intervention, nevertheless it does come with its own limitations. For instance, the workflow only retrieves and evaluates papers from the PubMed database, which could reduce its accuracy if studies with significant importance to the intervention are not published in Pubmed. Subsequently, to reduce hallucinations and to preserve tokens, the number of papers accessed from Pubmed has been limited to 5-10 papers in total. As a final point the program should not be run more than 3 times a day in order to avoid reaching the maximum requests per day error from the API providers under the free trial.
 
   
 
