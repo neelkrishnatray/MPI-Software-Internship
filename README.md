@@ -93,3 +93,9 @@ GROQ_API_KEY=your_key_here
 - **Gemini** – [aistudio.google.com](https://aistudio.google.com)
 - **Groq** – [console.groq.com](https://console.groq.com)
 
+  ---
+
+  ## Limitations
+
+  
+
