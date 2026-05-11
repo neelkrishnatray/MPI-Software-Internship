@@ -257,7 +257,7 @@ def generate_keywords(intervention_text: str) -> dict:
     
     response_text = call_with_fallback(prompt=prompt)
         
-    save_text(data=response_text, path=f"data/processed/keywords/{intervention_text}.json")
+    save_text(data=response_text, path=f"data/processed/keywords.json")
     
     try: 
         result = extract_json(text=response_text, error_info="generate_keywords() called")
@@ -765,7 +765,7 @@ def validate_data() -> None:
     
     # Keywords generieren mittels LLM
     keywords = generate_keywords(intervention_text=intervention_text)
-    # keywords = load_json(path="data/processed/keywords/rapamycin longevity.json")
+    # keywords = load_json(path="data/processed/keywords.json
     validated_papers, filtered_out = validate_all(papers=papers, keywords=keywords)
     
     print(f"[longevity_ai] {filtered_out} paper(s) filtered out.")

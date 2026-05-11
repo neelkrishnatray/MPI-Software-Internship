@@ -6,7 +6,7 @@
 # Input:  data/processed/ranked_papers.json
 #         data/processed/summary.json
 # Output: outputs/report.md
-#         outputs/report.pdf  (optional, requires LaTeX)
+#         outputs/report.pdf
 # ==================================================
 # IMPORTS:
 # ==================================================
@@ -230,44 +230,48 @@ Available sources:
 {sources_str}
  
 ---
+
+STRICT LENGTH RULES — these are hard limits, not suggestions:
+- Every section must be as concise as possible. Dense, information-rich prose only.
+- No filler phrases, only few repetition of findings already stated in a prior section if necessary.
+- Each section limit is stated below.
  
 Use exactly the following structure:
  
 # Scientific Report: {data["intervention"]}
  
 ## Abstract
-Brief summary (3-5 sentences) of the methodology and key findings.
+LIMIT: 3 sentences. Cover: research question, data basis, key finding, and evidence level.
  
 ## Introduction
-Contextualisation of the topic and relevance of the research question within longevity research.
+LIMIT: 3 sentences. State why this intervention is relevant to longevity research. Do not repeat the abstract.
 
 ## Trends
-Create a timeline and contextualise the trends found. Make sure to name the sources as well.
+LIMIT: 1-2 sentences per trend. Present as a compact chronological overview. Name source context per trend.
 
 ## Methodology
-Description of the data basis (PubMed search), filtering criteria, and evaluation logic.
+LIMIT: 3 sentences. State: data source (PubMed), number of papers, filtering logic, and evaluation criteria.
  
 ## Results
-Presentation of the verified, substantiated findings — structured by evidence level and study type.
- 
+LIMIT: 2 sentences per paper (max). Group by evidence level. State study type, result, and intervention relation.
+
 ## Biological Mechanisms
-Description of the identified mechanisms of action of the intervention.
+LIMIT: 4 sentences total. Name the mechanisms; do not elaborate beyond what the data supports.
 
 ## Clinical Gap Analysis
-Description of the identified clinical gaps. Make sure to include the Citation of found gaps and the Suggestions to close the gaps
+LIMIT: 1 focused paragraph per gap (3-4 sentences). Include: gap type, citation (title + PMID), and one concrete suggestion to close it.
 
 ## Discussion
-Interpretation of the results and critical examination of the limits of their validity.
+LIMIT: 4 sentences. Interpret results critically. Do not repeat findings from Results — add interpretive value only.
  
 ## Confidence Score Assessment
-Contextualisation of the Confidence Score.
-Briefly explain the calculation basis and interpret the score in the context of the available evidence.
+LIMIT: 3 sentences. State the score, explain the calculation basis briefly, interpret in context of evidence.
  
 ## Conclusion
-Answer to the research question in condensed form (3-5 sentences).
+LIMIT: 3 sentences. Directly answer the research question. Do not introduce new content.
  
 ## References
-List of sources used - exclusively from the provided references, none fabricated.
+One line per source. Use exclusively the provided references — none fabricated..
  
 ---
  
@@ -307,10 +311,74 @@ def save_pdf(markdown_text: str, path: str) -> None:
         <html><head>
         <meta charset="utf-8">
         <style>
-            body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; line-height: 1.6; }}
-            h1, h2, h3 {{ color: #2c3e50; }}
-            code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
-            pre {{ background: #f4f4f4; padding: 12px; border-radius: 5px; }}
+            @page {{
+                size: A4;
+                margin: 18mm 20mm 18mm 20mm;
+            }}
+
+            body {{
+                font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+                font-size: 8.5pt;
+                line-height: 1.45;
+                color: #1a1a1a;
+                max-width: 100%;
+            }}
+
+            h1 {{
+                font-size: 13pt;
+                font-weight: 700;
+                color: #1a2e4a;
+                margin: 0 0 6px 0;
+                padding-bottom: 5px;
+                border-bottom: 2px solid #1a2e4a;
+                letter-spacing: 0.3px;
+            }}
+
+            h2 {{
+                font-size: 9pt;
+                font-weight: 700;
+                color: #1a2e4a;
+                margin: 10px 0 3px 0;
+                text-transform: uppercase;
+                letter-spacing: 0.6px;
+                border-left: 3px solid #2980b9;
+                padding-left: 6px;
+            }}
+
+            h3 {{
+                font-size: 8.5pt;
+                font-weight: 600;
+                color: #2c3e50;
+                margin: 6px 0 2px 0;
+            }}
+
+            p {{
+                margin: 0 0 4px 0;
+                text-align: justify;
+            }}
+
+            ul, ol {{
+                margin: 2px 0 4px 0;
+                padding-left: 16px;
+            }}
+
+            li {{
+                margin-bottom: 1px;
+            }}
+
+            code {{
+                background: #f0f0f0;
+                padding: 1px 4px;
+                border-radius: 2px;
+                font-size: 7.5pt;
+            }}
+
+            pre {{
+                background: #f0f0f0;
+                padding: 6px 8px;
+                border-radius: 3px;
+                font-size: 7pt;
+            }}
         </style>
         </head>
         <body>{html_body}</body>
@@ -319,7 +387,7 @@ def save_pdf(markdown_text: str, path: str) -> None:
         HTML(string=html_full).write_pdf(path)
         print(f"[report_agent] PDF saved: {path}")
     except ImportError:
-        print("[report_agent] pypandoc not installed — skipping PDF export.")
+        print("[report_agent] weasyprint / markdown not installed — skipping PDF export.")
     except Exception as e:
         print(f"[report_agent] PDF export failed: {e}")
  

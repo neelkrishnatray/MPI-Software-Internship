@@ -63,7 +63,7 @@ def call_with_retry(func,max_retries=5) -> str:
             if is_quota_error(e): 
                 raise
             wait = (2**attempt)+random.uniform(0,1)
-            print(f"[Retry {attempt+1}]{type(e).__name__},waiting {wait:.2f}s...")
+            print(f"[Retry {attempt+1}] {type(e).__name__},waiting {wait:.2f}s...")
             time.sleep(wait)
     raise Exception("Max retries exceeded.")
 
